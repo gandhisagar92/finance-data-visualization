@@ -3,6 +3,7 @@ import tornado.escape
 from typing import Any
 import logging
 from meta import Meta
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -84,4 +85,22 @@ class ExpandHandler(BaseHandler):
         logger.info("/api/expand %s %s", node_type, business_id)
         result = self.graph_service.expand(node_type, business_id)
         self.write(result)
+
+
+class IndexHandler(tornado.web.RequestHandler):
+    @cors
+    async def get(self):
+        static_path = self.settings.get("static_path")
+        if not static_path:
+            self.set_status(404)
+            self.finish()
+            return
+        index_path = os.path.join(static_path, "index.html")
+        if not os.path.exists(index_path):
+            self.set_status(404)
+            self.write({"error": "index.html not found. Build frontend first."})
+            return
+        self.set_header("Content-Type", "text/html; charset=UTF-8")
+        with open(index_path, "r", encoding="utf-8") as f:
+            self.write(f.read())
 

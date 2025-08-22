@@ -1,7 +1,7 @@
 Reference Data Relationship Explorer
 
 Tech Stack
-- Frontend: React + TypeScript + Vite, Axios, TailwindCSS
+- Frontend: React + TypeScript + TailwindCSS + PostCSS + esbuild (no Vite)
 - Backend: Python (Tornado), file-backed JSON store (mock DB)
 - Node 20+, npm 10+, Python 3.10+
 
@@ -11,41 +11,22 @@ Run locally
      ```bash
      python3 -m pip install --break-system-packages -r /workspace/backend/requirements.txt
      ```
-   - Run:
-     ```bash
-     python3 /workspace/backend/app.py
-     ```
-   - Server runs on http://localhost:8000
-2. Frontend
-   - Install deps and run dev server:
-     ```bash
-     cd /workspace/frontend
-     npm install
-     npm run dev
-     ```
-   - App runs on http://localhost:5173 and proxies /api to backend
+2. Frontend (build static assets)
+   ```bash
+   cd /workspace/frontend
+   npm install
+   npm run build
+   ```
+   - This produces `/workspace/frontend/dist` with `assets/styles.css` and `assets/bundle.js`.
+3. Start backend (also serves frontend):
+   ```bash
+   python3 /workspace/backend/app.py
+   ```
+   - Open http://localhost:8000 to view the app (backend serves `/` and `/static/*`).
 
 API Contract
-- GET /api/meta → Meta for dynamic UI
-  Example response keys: referenceDataTypes (with queryBy + inputs)
-- POST /api/search
-  Request example:
-  ```json
-  {
-    "referenceDataType": "Stock",
-    "queryByType": "InstrumentId",
-    "inputs": { "InstrumentId": "AAPL" }
-  }
-  ```
-  Response shape:
-  ```json
-  {
-    "metaVersion": 1,
-    "nodes": [{"id": "Stock:AAPL", "type": "Stock", "label": "Apple Inc.", "attributes": {"instrumentId": "AAPL"}}],
-    "edges": [{"id": "Stock:AAPL->HAS->StockTradingLine:AAPL.N", "source": "Stock:AAPL", "target": "StockTradingLine:AAPL.N", "type": "HAS"}],
-    "root": "Stock:AAPL"
-  }
-  ```
+- GET /api/meta → Meta for dynamic UI + graph/ui config
+- POST /api/search → returns graph {nodes, edges, root}
 - GET /api/node/:nodeType/:id → Full payload for a node
 - GET /api/expand?nodeType=...&id=... → Expand relationships for a node
 
@@ -54,11 +35,9 @@ Graph Model
 - Edge types: HAS, LISTED_ON, HAS_UNDERLYING
 
 UI/Graph Behavior
-- Left panel: Search inputs (dynamic by type/query) and node details
-- Right panel: Interactive graph; draggable nodes, scrollable canvas, zoom/pan; edges follow nodes
-
-Large Graph Strategy
-- Client-side filter box may be added to narrow nodes/edges; backend is ready for pagination if needed.
+- Header bar with title "Reference Data Explorer"
+- Left panel: dynamic SearchForm; bottom-left NodeDetails
+- Right panel: full-panel interactive graph; draggable nodes and attributes; zoom/pan; toggle to hide/show sub-elements; hover tooltip shows attributes
 
 ERD (conceptual)
 - Stock (instrumentId, isin, name, tradingLines[])
@@ -71,10 +50,6 @@ ERD (conceptual)
 - Future (instrumentId, isin, postTradeId, contractSize, lastTradeDate, tradingLines[], underlyingInstrumentIds[])
 - FutureTradingLine (tradingLineId, ric, bloombergTicker, currency, exchangeMic)
 - Exchange (mic, name)
-
-Caching
-- Frontend caches node payloads by node id in-memory.
-- Backend file store caches loaded JSON per file in-process.
 
 Mock Data
 - See backend/data/*.json for mock records.

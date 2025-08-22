@@ -81,5 +81,24 @@ class Meta:
                     ],
                 },
             ],
+            "graphConfig": {
+                "NODE_WIDTH": 200,
+                "NODE_HEIGHT": 100,
+                "ATTR_WIDTH": 140,
+                "ATTR_HEIGHT": 40,
+                "LEVEL_SPACING_MIN": 260,
+                "LEVEL_SPACING_MAX": 480,
+                "VERTICAL_SPACING_MIN": 140,
+                "VERTICAL_SPACING_MAX": 240,
+                "ATTR_OFFSET_Y": -60,
+                "ATTR_SPACING_X": 50,
+                "MIN_ZOOM": 0.1,
+                "MAX_ZOOM": 3,
+                "ZOOM_STEP": 0.1
+            },
+            "uiConfig": {
+                "LEFT_WIDTH": 350,
+                "TOP_HEIGHT": 300
+            }
         }
 
