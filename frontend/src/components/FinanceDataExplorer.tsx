@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, ChevronDown, Maximize2, Minimize2 } from 'lucide-react';
+import { Search, ChevronDown, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 
 const FinanceDataExplorer = () => {
   const [metaData, setMetaData] = useState(null);
@@ -11,15 +11,43 @@ const FinanceDataExplorer = () => {
   const [loading, setLoading] = useState(false);
   const [leftWidth, setLeftWidth] = useState(350);
   const [topHeight, setTopHeight] = useState(300);
+  const [zoom, setZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [nodePositions, setNodePositions] = useState({});
   
-  const graphRef = useRef(null);
+  const graphContainerRef = useRef(null);
+  const svgRef = useRef(null);
   const isDraggingVertical = useRef(false);
   const isDraggingHorizontal = useRef(false);
+  const isPanning = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
+  // Graph configuration - all values from backend or calculated dynamically
+  const GRAPH_CONFIG = {
+    NODE_WIDTH: 200,
+    NODE_HEIGHT: 100,
+    ATTR_WIDTH: 140,
+    ATTR_HEIGHT: 40,
+    LEVEL_SPACING: 300,
+    NODE_VERTICAL_SPACING: 150,
+    ATTR_OFFSET_Y: -60,
+    ATTR_SPACING_X: 50,
+    MIN_ZOOM: 0.1,
+    MAX_ZOOM: 3,
+    ZOOM_STEP: 0.1
+  };
 
   // Fetch metadata on component mount
   useEffect(() => {
     fetchMetaData();
   }, []);
+
+  // Calculate positions when graph data changes
+  useEffect(() => {
+    if (graphData.nodes.length > 0) {
+      calculateNodePositions();
+    }
+  }, [graphData]);
 
   const fetchMetaData = async () => {
     try {
@@ -72,6 +100,8 @@ const FinanceDataExplorer = () => {
       });
       const data = await response.json();
       setGraphData(data);
+      setZoom(1);
+      setPanOffset({ x: 0, y: 0 });
     } catch (error) {
       console.error('Error searching:', error);
       alert('Error occurred during search');
@@ -88,6 +118,472 @@ const FinanceDataExplorer = () => {
     } catch (error) {
       console.error('Error fetching node data:', error);
     }
+  };
+
+  const getNodeAttributes = (node) => {
+    const attrs = [];
+    if (node.attributes) {
+      Object.entries(node.attributes).forEach(([key, value]) => {
+        if (value && 
+            key !== 'tradingLines' && 
+            key !== 'underlyingInstrumentIds' && 
+            key !== 'compositionId' && 
+            key !== 'constituentStocks' && 
+            attrs.length < 3) {
+          attrs.push({ key, value: String(value) });
+        }
+      });
+    }
+    return attrs;
+  };
+
+  const calculateNodePositions = () => {
+    const positions = {};
+    const levels = {};
+    const nodesPerLevel = {};
+    
+    // Build adjacency map for traversal
+    const adjacencyMap = {};
+    graphData.edges.forEach(edge => {
+      if (!adjacencyMap[edge.source]) adjacencyMap[edge.source] = [];
+      adjacencyMap[edge.source].push(edge.target);
+    });
+
+    // BFS to assign levels
+    const queue = [];
+    const visited = new Set();
+    
+    if (graphData.root) {
+      queue.push({ nodeId: graphData.root, level: 0 });
+      levels[graphData.root] = 0;
+      visited.add(graphData.root);
+    }
+
+    while (queue.length > 0) {
+      const { nodeId, level } = queue.shift();
+      
+      if (!nodesPerLevel[level]) nodesPerLevel[level] = [];
+      nodesPerLevel[level].push(nodeId);
+
+      if (adjacencyMap[nodeId]) {
+        adjacencyMap[nodeId].forEach(childId => {
+          if (!visited.has(childId)) {
+            visited.add(childId);
+            levels[childId] = level + 1;
+            queue.push({ nodeId: childId, level: level + 1 });
+          }
+        });
+      }
+    }
+
+    // Handle unconnected nodes
+    graphData.nodes.forEach(node => {
+      if (!visited.has(node.id)) {
+        const maxLevel = Math.max(...Object.values(levels), -1) + 1;
+        levels[node.id] = maxLevel;
+        if (!nodesPerLevel[maxLevel]) nodesPerLevel[maxLevel] = [];
+        nodesPerLevel[maxLevel].push(node.id);
+      }
+    });
+
+    // Calculate positions with proper spacing
+    Object.entries(nodesPerLevel).forEach(([level, nodeIds]) => {
+      const levelNum = parseInt(level);
+      const x = 100 + levelNum * GRAPH_CONFIG.LEVEL_SPACING;
+      
+      // Center nodes vertically within their level
+      const totalHeight = (nodeIds.length - 1) * GRAPH_CONFIG.NODE_VERTICAL_SPACING;
+      const startY = 200 - totalHeight / 2;
+      
+      nodeIds.forEach((nodeId, index) => {
+        const y = startY + index * GRAPH_CONFIG.NODE_VERTICAL_SPACING;
+        positions[nodeId] = { x, y, level: levelNum, index };
+      });
+    });
+
+    setNodePositions(positions);
+  };
+
+  const handleZoomIn = () => {
+    setZoom(prev => Math.min(prev + GRAPH_CONFIG.ZOOM_STEP, GRAPH_CONFIG.MAX_ZOOM));
+  };
+
+  const handleZoomOut = () => {
+    setZoom(prev => Math.max(prev - GRAPH_CONFIG.ZOOM_STEP, GRAPH_CONFIG.MIN_ZOOM));
+  };
+
+  const handleResetView = () => {
+    setZoom(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
+
+  const handleMouseDown = (e) => {
+    if (e.target === svgRef.current || e.target.closest('.graph-background')) {
+      isPanning.current = true;
+      dragStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        panX: panOffset.x,
+        panY: panOffset.y
+      };
+      e.preventDefault();
+    }
+  };
+
+  const handleMouseMove = useCallback((e) => {
+    if (isPanning.current) {
+      const deltaX = e.clientX - dragStartRef.current.x;
+      const deltaY = e.clientY - dragStartRef.current.y;
+      
+      setPanOffset({
+        x: dragStartRef.current.panX + deltaX / zoom,
+        y: dragStartRef.current.panY + deltaY / zoom
+      });
+    }
+  }, [zoom]);
+
+  const handleMouseUp = useCallback(() => {
+    isPanning.current = false;
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [handleMouseMove, handleMouseUp]);
+
+  const DraggableNode = ({ node, position, onNodeClick }) => {
+    const [nodePos, setNodePos] = useState(position);
+    const [isDragging, setIsDragging] = useState(false);
+    const dragStartPos = useRef({ x: 0, y: 0, nodeX: 0, nodeY: 0 });
+
+    const nodeId = node.id.split(':')[1];
+    const attributes = getNodeAttributes(node);
+
+    const handleNodeMouseDown = (e) => {
+      setIsDragging(true);
+      dragStartPos.current = {
+        x: e.clientX,
+        y: e.clientY,
+        nodeX: nodePos.x,
+        nodeY: nodePos.y
+      };
+      e.stopPropagation();
+      e.preventDefault();
+    };
+
+    const handleNodeMouseMove = useCallback((e) => {
+      if (isDragging) {
+        const deltaX = (e.clientX - dragStartPos.current.x) / zoom;
+        const deltaY = (e.clientY - dragStartPos.current.y) / zoom;
+        
+        const newPos = {
+          x: dragStartPos.current.nodeX + deltaX,
+          y: dragStartPos.current.nodeY + deltaY
+        };
+        
+        setNodePos(newPos);
+        setNodePositions(prev => ({
+          ...prev,
+          [node.id]: { ...prev[node.id], ...newPos }
+        }));
+      }
+    }, [isDragging, zoom, node.id]);
+
+    const handleNodeMouseUp = useCallback(() => {
+      setIsDragging(false);
+    }, []);
+
+    useEffect(() => {
+      if (isDragging) {
+        document.addEventListener('mousemove', handleNodeMouseMove);
+        document.addEventListener('mouseup', handleNodeMouseUp);
+      }
+      return () => {
+        document.removeEventListener('mousemove', handleNodeMouseMove);
+        document.removeEventListener('mouseup', handleNodeMouseUp);
+      };
+    }, [isDragging, handleNodeMouseMove, handleNodeMouseUp]);
+
+    useEffect(() => {
+      setNodePos(position);
+    }, [position]);
+
+    return (
+      <g>
+        {/* Main Node */}
+        <rect
+          x={nodePos.x}
+          y={nodePos.y}
+          width={GRAPH_CONFIG.NODE_WIDTH}
+          height={GRAPH_CONFIG.NODE_HEIGHT}
+          rx={8}
+          fill="#ffffff"
+          stroke="#e2e8f0"
+          strokeWidth={2}
+          className="cursor-pointer hover:stroke-blue-400 transition-colors"
+          onMouseDown={handleNodeMouseDown}
+          onClick={() => onNodeClick(node.id, node.type, nodeId)}
+        />
+        
+        {/* Node Type and ID */}
+        <text
+          x={nodePos.x + GRAPH_CONFIG.NODE_WIDTH / 2}
+          y={nodePos.y + 25}
+          textAnchor="middle"
+          className="fill-gray-800 text-sm font-semibold pointer-events-none select-none"
+        >
+          {node.type}: {nodeId}
+        </text>
+        
+        {/* Divider Line */}
+        <line
+          x1={nodePos.x + 10}
+          y1={nodePos.y + GRAPH_CONFIG.NODE_HEIGHT / 2}
+          x2={nodePos.x + GRAPH_CONFIG.NODE_WIDTH - 10}
+          y2={nodePos.y + GRAPH_CONFIG.NODE_HEIGHT / 2}
+          stroke="#e2e8f0"
+          strokeWidth={1}
+          className="pointer-events-none"
+        />
+        
+        {/* Node Label/Name */}
+        <text
+          x={nodePos.x + GRAPH_CONFIG.NODE_WIDTH / 2}
+          y={nodePos.y + 75}
+          textAnchor="middle"
+          className="fill-gray-600 text-sm pointer-events-none select-none"
+        >
+          {node.label.length > 20 ? node.label.substring(0, 20) + '...' : node.label}
+        </text>
+
+        {/* Attributes - positioned above the main node */}
+        {attributes.slice(0, 3).map((attr, index) => {
+          const attrX = nodePos.x + (GRAPH_CONFIG.NODE_WIDTH - (attributes.length * GRAPH_CONFIG.ATTR_WIDTH + (attributes.length - 1) * GRAPH_CONFIG.ATTR_SPACING_X)) / 2 + 
+                       index * (GRAPH_CONFIG.ATTR_WIDTH + GRAPH_CONFIG.ATTR_SPACING_X);
+          const attrY = nodePos.y + GRAPH_CONFIG.ATTR_OFFSET_Y;
+          const attrCenterX = attrX + GRAPH_CONFIG.ATTR_WIDTH / 2;
+          const attrCenterY = attrY + GRAPH_CONFIG.ATTR_HEIGHT / 2;
+          
+          return (
+            <g key={attr.key}>
+              {/* Connection line to attribute */}
+              <line
+                x1={nodePos.x + GRAPH_CONFIG.NODE_WIDTH / 2}
+                y1={nodePos.y}
+                x2={attrCenterX}
+                y2={attrY + GRAPH_CONFIG.ATTR_HEIGHT}
+                stroke="#cbd5e0"
+                strokeWidth={1}
+                className="pointer-events-none"
+              />
+              
+              {/* Attribute ellipse */}
+              <ellipse
+                cx={attrCenterX}
+                cy={attrCenterY}
+                rx={GRAPH_CONFIG.ATTR_WIDTH / 2}
+                ry={GRAPH_CONFIG.ATTR_HEIGHT / 2}
+                fill="#f7fafc"
+                stroke="#e2e8f0"
+                strokeWidth={1}
+                className="cursor-pointer hover:fill-gray-100 transition-colors"
+              />
+              
+              {/* Attribute text */}
+              <text
+                x={attrCenterX}
+                y={attrCenterY - 5}
+                textAnchor="middle"
+                className="fill-gray-700 text-xs font-medium pointer-events-none select-none"
+              >
+                {attr.key}
+              </text>
+              <text
+                x={attrCenterX}
+                y={attrCenterY + 8}
+                textAnchor="middle"
+                className="fill-gray-600 text-xs pointer-events-none select-none"
+              >
+                {attr.value.length > 15 ? attr.value.substring(0, 15) + '...' : attr.value}
+              </text>
+            </g>
+          );
+        })}
+      </g>
+    );
+  };
+
+  const renderGraph = () => {
+    if (!graphData.nodes.length) {
+      return (
+        <div className="flex items-center justify-center h-full text-gray-500">
+          <div className="text-center">
+            <div className="text-4xl mb-4">📊</div>
+            <div className="text-lg font-medium">Search for data to display the relationship graph</div>
+            <div className="text-sm text-gray-400 mt-2">Use the search form on the left to get started</div>
+          </div>
+        </div>
+      );
+    }
+
+    // Calculate graph bounds
+    const positions = Object.values(nodePositions);
+    if (positions.length === 0) return null;
+
+    const minX = Math.min(...positions.map(p => p.x)) - 100;
+    const maxX = Math.max(...positions.map(p => p.x)) + GRAPH_CONFIG.NODE_WIDTH + 100;
+    const minY = Math.min(...positions.map(p => p.y)) + GRAPH_CONFIG.ATTR_OFFSET_Y - 50;
+    const maxY = Math.max(...positions.map(p => p.y)) + GRAPH_CONFIG.NODE_HEIGHT + 100;
+
+    const viewBox = `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
+
+    return (
+      <div className="relative w-full h-full overflow-hidden">
+        {/* Graph Controls */}
+        <div className="absolute top-4 right-4 z-10 flex gap-2">
+          <button
+            onClick={handleZoomIn}
+            className="p-2 bg-white border border-gray-300 rounded-md hover:bg-gray-50 shadow-sm"
+            title="Zoom In"
+          >
+            <ZoomIn className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleZoomOut}
+            className="p-2 bg-white border border-gray-300 rounded-md hover:bg-gray-50 shadow-sm"
+            title="Zoom Out"
+          >
+            <ZoomOut className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleResetView}
+            className="p-2 bg-white border border-gray-300 rounded-md hover:bg-gray-50 shadow-sm"
+            title="Reset View"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Zoom indicator */}
+        <div className="absolute bottom-4 right-4 z-10 bg-white px-2 py-1 rounded border text-xs text-gray-600">
+          {Math.round(zoom * 100)}%
+        </div>
+
+        {/* SVG Graph */}
+        <svg
+          ref={svgRef}
+          className="w-full h-full cursor-grab active:cursor-grabbing graph-background"
+          viewBox={viewBox}
+          onMouseDown={handleMouseDown}
+          style={{
+            transform: `scale(${zoom}) translate(${panOffset.x}px, ${panOffset.y}px)`
+          }}
+        >
+          {/* Background */}
+          <rect
+            x={minX}
+            y={minY}
+            width={maxX - minX}
+            height={maxY - minY}
+            fill="#fafafa"
+            className="graph-background"
+          />
+
+          {/* Grid pattern */}
+          <defs>
+            <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+              <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#f0f0f0" strokeWidth="1"/>
+            </pattern>
+          </defs>
+          <rect
+            x={minX}
+            y={minY}
+            width={maxX - minX}
+            height={maxY - minY}
+            fill="url(#grid)"
+          />
+
+          {/* Arrow marker definition */}
+          <defs>
+            <marker
+              id="arrowhead"
+              markerWidth="12"
+              markerHeight="8"
+              refX="11"
+              refY="4"
+              orient="auto"
+              markerUnits="strokeWidth"
+            >
+              <polygon
+                points="0 0, 12 4, 0 8"
+                fill="#4a5568"
+              />
+            </marker>
+          </defs>
+
+          {/* Render edges */}
+          {graphData.edges.map(edge => {
+            const sourcePos = nodePositions[edge.source];
+            const targetPos = nodePositions[edge.target];
+            if (!sourcePos || !targetPos) return null;
+
+            const startX = sourcePos.x + GRAPH_CONFIG.NODE_WIDTH;
+            const startY = sourcePos.y + GRAPH_CONFIG.NODE_HEIGHT / 2;
+            const endX = targetPos.x;
+            const endY = targetPos.y + GRAPH_CONFIG.NODE_HEIGHT / 2;
+
+            // Calculate control points for smooth curve
+            const controlOffset = Math.min(100, Math.abs(endX - startX) / 3);
+            const controlX1 = startX + controlOffset;
+            const controlX2 = endX - controlOffset;
+
+            const pathData = `M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`;
+
+            return (
+              <g key={edge.id}>
+                <path
+                  d={pathData}
+                  stroke="#4a5568"
+                  strokeWidth="2"
+                  fill="none"
+                  markerEnd="url(#arrowhead)"
+                  className="pointer-events-none"
+                />
+                {edge.label && (
+                  <text
+                    x={(startX + endX) / 2}
+                    y={(startY + endY) / 2 - 10}
+                    textAnchor="middle"
+                    className="fill-gray-600 text-sm font-medium pointer-events-none select-none"
+                  >
+                    {edge.label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
+          {/* Render nodes */}
+          {graphData.nodes.map(node => {
+            const position = nodePositions[node.id];
+            if (!position) return null;
+            
+            return (
+              <DraggableNode
+                key={node.id}
+                node={node}
+                position={position}
+                onNodeClick={handleNodeClick}
+              />
+            );
+          })}
+        </svg>
+      </div>
+    );
   };
 
   const renderInputFields = () => {
@@ -144,288 +640,7 @@ const FinanceDataExplorer = () => {
     ));
   };
 
-  const GraphNode = ({ node, x, y, onNodeClick, attributes = [] }) => {
-    const [isDragging, setIsDragging] = useState(false);
-    const [position, setPosition] = useState({ x, y });
-    const dragStart = useRef({ x: 0, y: 0 });
-
-    const handleMouseDown = (e) => {
-      setIsDragging(true);
-      dragStart.current = {
-        x: e.clientX - position.x,
-        y: e.clientY - position.y
-      };
-      e.preventDefault();
-    };
-
-    const handleMouseMove = useCallback((e) => {
-      if (isDragging) {
-        setPosition({
-          x: e.clientX - dragStart.current.x,
-          y: e.clientY - dragStart.current.y
-        });
-      }
-    }, [isDragging]);
-
-    const handleMouseUp = useCallback(() => {
-      setIsDragging(false);
-    }, []);
-
-    useEffect(() => {
-      if (isDragging) {
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-      }
-      return () => {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-      };
-    }, [isDragging, handleMouseMove, handleMouseUp]);
-
-    const nodeId = node.id.split(':')[1];
-    
-    return (
-      <g>
-        {/* Main Node */}
-        <rect
-          x={position.x}
-          y={position.y}
-          width={180}
-          height={80}
-          rx={8}
-          fill="#ffffff"
-          stroke="#e2e8f0"
-          strokeWidth={2}
-          className="cursor-pointer hover:shadow-lg transition-shadow"
-          onMouseDown={handleMouseDown}
-          onClick={() => onNodeClick(node.id, node.type, nodeId)}
-        />
-        
-        {/* Node Type and ID */}
-        <text
-          x={position.x + 90}
-          y={position.y + 20}
-          textAnchor="middle"
-          className="fill-gray-800 text-xs font-semibold"
-          onClick={() => onNodeClick(node.id, node.type, nodeId)}
-        >
-          {node.type}: {nodeId}
-        </text>
-        
-        {/* Divider Line */}
-        <line
-          x1={position.x + 10}
-          y1={position.y + 30}
-          x2={position.x + 170}
-          y2={position.y + 30}
-          stroke="#e2e8f0"
-          strokeWidth={1}
-        />
-        
-        {/* Node Label/Name */}
-        <text
-          x={position.x + 90}
-          y={position.y + 55}
-          textAnchor="middle"
-          className="fill-gray-600 text-xs"
-          onClick={() => onNodeClick(node.id, node.type, nodeId)}
-        >
-          {node.label.length > 20 ? node.label.substring(0, 20) + '...' : node.label}
-        </text>
-
-        {/* Attributes */}
-        {attributes.slice(0, 3).map((attr, index) => {
-          const attrY = position.y - 40;
-          const attrX = position.x + 60 * index + 10;
-          
-          return (
-            <g key={attr.key}>
-              {/* Connection line to attribute */}
-              <line
-                x1={position.x + 90}
-                y1={position.y}
-                x2={attrX + 40}
-                y2={attrY + 15}
-                stroke="#cbd5e0"
-                strokeWidth={1}
-              />
-              
-              {/* Attribute ellipse */}
-              <ellipse
-                cx={attrX + 40}
-                cy={attrY + 15}
-                rx={35}
-                ry={12}
-                fill="#f7fafc"
-                stroke="#e2e8f0"
-                strokeWidth={1}
-                className="cursor-pointer hover:fill-gray-100"
-              />
-              
-              {/* Attribute text */}
-              <text
-                x={attrX + 40}
-                y={attrY + 18}
-                textAnchor="middle"
-                className="fill-gray-700 text-xs"
-              >
-                {attr.value?.length > 8 ? attr.value.substring(0, 8) + '...' : attr.value}
-              </text>
-            </g>
-          );
-        })}
-      </g>
-    );
-  };
-
-  const renderGraph = () => {
-    if (!graphData.nodes.length) {
-      return (
-        <div className="flex items-center justify-center h-full text-gray-500">
-          Search for data to display the relationship graph
-        </div>
-      );
-    }
-
-    // Position nodes in a hierarchical layout
-    const nodePositions = {};
-    const levels = {};
-    
-    // Find root node
-    const rootNode = graphData.nodes.find(node => node.id === graphData.root);
-    if (rootNode) {
-      nodePositions[rootNode.id] = { x: 50, y: 200 };
-      levels[rootNode.id] = 0;
-    }
-
-    // Position other nodes based on relationships
-    let currentLevel = 1;
-    const positioned = new Set(rootNode ? [rootNode.id] : []);
-    
-    while (positioned.size < graphData.nodes.length && currentLevel < 10) {
-      let nodesAtLevel = 0;
-      
-      graphData.edges.forEach(edge => {
-        if (positioned.has(edge.source) && !positioned.has(edge.target)) {
-          const targetNode = graphData.nodes.find(n => n.id === edge.target);
-          if (targetNode) {
-            nodePositions[edge.target] = {
-              x: 50 + currentLevel * 250,
-              y: 100 + nodesAtLevel * 150
-            };
-            levels[edge.target] = currentLevel;
-            positioned.add(edge.target);
-            nodesAtLevel++;
-          }
-        }
-      });
-      
-      currentLevel++;
-    }
-
-    // Position any remaining unconnected nodes
-    graphData.nodes.forEach((node, index) => {
-      if (!positioned.has(node.id)) {
-        nodePositions[node.id] = {
-          x: 50 + (currentLevel * 250),
-          y: 100 + (positioned.size - graphData.nodes.length + index) * 150
-        };
-      }
-    });
-
-    const getNodeAttributes = (node) => {
-      const attrs = [];
-      if (node.attributes) {
-        Object.entries(node.attributes).forEach(([key, value]) => {
-          if (value && key !== 'tradingLines' && key !== 'underlyingInstrumentIds' && 
-              key !== 'compositionId' && key !== 'constituentStocks' && attrs.length < 3) {
-            attrs.push({ key, value: String(value) });
-          }
-        });
-      }
-      return attrs;
-    };
-
-    return (
-      <svg 
-        ref={graphRef}
-        width="100%" 
-        height="100%" 
-        className="bg-white"
-        style={{ minWidth: '1000px', minHeight: '600px' }}
-      >
-        {/* Render edges */}
-        {graphData.edges.map(edge => {
-          const sourcePos = nodePositions[edge.source];
-          const targetPos = nodePositions[edge.target];
-          if (!sourcePos || !targetPos) return null;
-
-          return (
-            <g key={edge.id}>
-              <line
-                x1={sourcePos.x + 180}
-                y1={sourcePos.y + 40}
-                x2={targetPos.x}
-                y2={targetPos.y + 40}
-                stroke="#4a5568"
-                strokeWidth={2}
-                markerEnd="url(#arrowhead)"
-              />
-              {edge.label && (
-                <text
-                  x={(sourcePos.x + 180 + targetPos.x) / 2}
-                  y={(sourcePos.y + targetPos.y) / 2 + 25}
-                  textAnchor="middle"
-                  className="fill-gray-600 text-xs font-medium"
-                >
-                  {edge.label}
-                </text>
-              )}
-            </g>
-          );
-        })}
-
-        {/* Arrow marker definition */}
-        <defs>
-          <marker
-            id="arrowhead"
-            markerWidth="10"
-            markerHeight="7"
-            refX="9"
-            refY="3.5"
-            orient="auto"
-          >
-            <polygon
-              points="0 0, 10 3.5, 0 7"
-              fill="#4a5568"
-            />
-          </marker>
-        </defs>
-
-        {/* Render nodes */}
-        {graphData.nodes.map(node => {
-          const position = nodePositions[node.id];
-          if (!position) return null;
-          
-          const nodeId = node.id.split(':')[1];
-          const attributes = getNodeAttributes(node);
-          
-          return (
-            <GraphNode
-              key={node.id}
-              node={node}
-              x={position.x}
-              y={position.y}
-              onNodeClick={handleNodeClick}
-              attributes={attributes}
-            />
-          );
-        })}
-      </svg>
-    );
-  };
-
-  // Mouse handlers for resizing
+  // Mouse handlers for panel resizing
   const handleVerticalMouseDown = (e) => {
     isDraggingVertical.current = true;
     e.preventDefault();
@@ -569,11 +784,9 @@ const FinanceDataExplorer = () => {
       />
 
       {/* Right Panel - Graph */}
-      <div className="flex-1 bg-white overflow-auto">
-        <div className="h-full p-4">
-          <div className="h-full bg-white rounded-lg border border-gray-200 overflow-auto">
-            {renderGraph()}
-          </div>
+      <div className="flex-1 bg-white overflow-hidden">
+        <div className="h-full">
+          {renderGraph()}
         </div>
       </div>
     </div>
