@@ -1,22 +1,30 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, ChevronDown, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+type GraphNode = { id: string; type: string; label: string; attributes?: Record<string, unknown> };
+type GraphEdge = { id: string; source: string; target: string; type: string; label?: string };
+type GraphResponse = { nodes: GraphNode[]; edges: GraphEdge[]; root: string | null };
+type MetaInput = { id: string; label: string; kind: 'text'|'number'|'date'|'select'; options?: string[] };
+type MetaQueryOption = { type: string; inputs: MetaInput[] };
+type MetaRefType = { type: string; display: string; queryBy: MetaQueryOption[] };
+type MetaData = { referenceDataTypes: MetaRefType[] } | null;
+type NodePositions = Record<string, { x: number; y: number; level: number; index: number }>;
 
 const FinanceDataExplorer = () => {
-  const [metaData, setMetaData] = useState(null);
-  const [selectedRefDataType, setSelectedRefDataType] = useState('');
-  const [selectedQueryBy, setSelectedQueryBy] = useState('');
-  const [inputValues, setInputValues] = useState({});
-  const [graphData, setGraphData] = useState({ nodes: [], edges: [], root: null });
-  const [selectedNode, setSelectedNode] = useState(null);
+  const [metaData, setMetaData] = useState<MetaData>(null);
+  const [selectedRefDataType, setSelectedRefDataType] = useState<string>('');
+  const [selectedQueryBy, setSelectedQueryBy] = useState<string>('');
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
+  const [graphData, setGraphData] = useState<GraphResponse>({ nodes: [], edges: [], root: null });
+  const [selectedNode, setSelectedNode] = useState<{ id: string; data: unknown } | null>(null);
   const [loading, setLoading] = useState(false);
   const [leftWidth, setLeftWidth] = useState(350);
   const [topHeight, setTopHeight] = useState(300);
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [nodePositions, setNodePositions] = useState({});
+  const [nodePositions, setNodePositions] = useState<NodePositions>({});
   
-  const graphContainerRef = useRef(null);
-  const svgRef = useRef(null);
+  const graphContainerRef = useRef<HTMLDivElement | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const isDraggingVertical = useRef(false);
   const isDraggingHorizontal = useRef(false);
   const isPanning = useRef(false);
@@ -59,20 +67,20 @@ const FinanceDataExplorer = () => {
     }
   };
 
-  const handleRefDataTypeChange = (e) => {
+  const handleRefDataTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     setSelectedRefDataType(value);
     setSelectedQueryBy('');
     setInputValues({});
   };
 
-  const handleQueryByChange = (e) => {
+  const handleQueryByChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     setSelectedQueryBy(value);
     setInputValues({});
   };
 
-  const handleInputChange = (fieldId, value) => {
+  const handleInputChange = (fieldId: string, value: string) => {
     setInputValues(prev => ({
       ...prev,
       [fieldId]: value
@@ -110,7 +118,7 @@ const FinanceDataExplorer = () => {
     }
   };
 
-  const handleNodeClick = async (nodeId, nodeType, businessId) => {
+  const handleNodeClick = async (nodeId: string, nodeType: string, businessId: string) => {
     try {
       const response = await fetch(`/api/node/${nodeType}/${businessId}`);
       const data = await response.json();
@@ -120,8 +128,8 @@ const FinanceDataExplorer = () => {
     }
   };
 
-  const getNodeAttributes = (node) => {
-    const attrs = [];
+  const getNodeAttributes = (node: GraphNode) => {
+    const attrs: { key: string; value: string }[] = [];
     if (node.attributes) {
       Object.entries(node.attributes).forEach(([key, value]) => {
         if (value && 
@@ -138,20 +146,20 @@ const FinanceDataExplorer = () => {
   };
 
   const calculateNodePositions = () => {
-    const positions = {};
-    const levels = {};
-    const nodesPerLevel = {};
+    const positions: NodePositions = {};
+    const levels: Record<string, number> = {};
+    const nodesPerLevel: Record<number, string[]> = {};
     
     // Build adjacency map for traversal
-    const adjacencyMap = {};
+    const adjacencyMap: Record<string, string[]> = {};
     graphData.edges.forEach(edge => {
       if (!adjacencyMap[edge.source]) adjacencyMap[edge.source] = [];
       adjacencyMap[edge.source].push(edge.target);
     });
 
     // BFS to assign levels
-    const queue = [];
-    const visited = new Set();
+    const queue: Array<{ nodeId: string; level: number }> = [];
+    const visited: Set<string> = new Set();
     
     if (graphData.root) {
       queue.push({ nodeId: graphData.root, level: 0 });
@@ -179,24 +187,31 @@ const FinanceDataExplorer = () => {
     // Handle unconnected nodes
     graphData.nodes.forEach(node => {
       if (!visited.has(node.id)) {
-        const maxLevel = Math.max(...Object.values(levels), -1) + 1;
+        const maxLevel = Math.max(...(Object.values(levels) as number[]), -1) + 1;
         levels[node.id] = maxLevel;
         if (!nodesPerLevel[maxLevel]) nodesPerLevel[maxLevel] = [];
         nodesPerLevel[maxLevel].push(node.id);
       }
     });
 
+    // Dynamic spacing for tidier edges
+    const levelKeys = Object.keys(nodesPerLevel).map(n => parseInt(n, 10));
+    const maxPerLevel = levelKeys.length ? Math.max(...levelKeys.map(k => (nodesPerLevel[k] || []).length)) : 1;
+    const dynamicLevelSpacing = Math.max(260, Math.min(480, 220 + 60 * Math.log2(Math.max(2, maxPerLevel))));
+    const dynamicVerticalSpacing = Math.max(140, Math.min(240, 120 + 20 * maxPerLevel));
+
     // Calculate positions with proper spacing
     Object.entries(nodesPerLevel).forEach(([level, nodeIds]) => {
       const levelNum = parseInt(level);
-      const x = 100 + levelNum * GRAPH_CONFIG.LEVEL_SPACING;
+      const x = 100 + levelNum * dynamicLevelSpacing;
       
       // Center nodes vertically within their level
-      const totalHeight = (nodeIds.length - 1) * GRAPH_CONFIG.NODE_VERTICAL_SPACING;
+      const ids = nodeIds as string[];
+      const totalHeight = (ids.length - 1) * dynamicVerticalSpacing;
       const startY = 200 - totalHeight / 2;
       
-      nodeIds.forEach((nodeId, index) => {
-        const y = startY + index * GRAPH_CONFIG.NODE_VERTICAL_SPACING;
+      ids.forEach((nodeId, index) => {
+        const y = startY + index * dynamicVerticalSpacing;
         positions[nodeId] = { x, y, level: levelNum, index };
       });
     });
@@ -217,8 +232,8 @@ const FinanceDataExplorer = () => {
     setPanOffset({ x: 0, y: 0 });
   };
 
-  const handleMouseDown = (e) => {
-    if (e.target === svgRef.current || e.target.closest('.graph-background')) {
+  const handleMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (e.target === svgRef.current || (e.target as Element).closest('.graph-background')) {
       isPanning.current = true;
       dragStartRef.current = {
         x: e.clientX,
@@ -230,7 +245,7 @@ const FinanceDataExplorer = () => {
     }
   };
 
-  const handleMouseMove = useCallback((e) => {
+  const handleMouseMove = useCallback((e: MouseEvent) => {
     if (isPanning.current) {
       const deltaX = e.clientX - dragStartRef.current.x;
       const deltaY = e.clientY - dragStartRef.current.y;
@@ -255,7 +270,7 @@ const FinanceDataExplorer = () => {
     };
   }, [handleMouseMove, handleMouseUp]);
 
-  const DraggableNode = ({ node, position, onNodeClick }) => {
+  const DraggableNode = ({ node, position, onNodeClick }: { node: GraphNode; position: { x: number; y: number; level: number; index: number }; onNodeClick: (id: string, type: string, businessId: string) => void }) => {
     const [nodePos, setNodePos] = useState(position);
     const [isDragging, setIsDragging] = useState(false);
     const dragStartPos = useRef({ x: 0, y: 0, nodeX: 0, nodeY: 0 });
@@ -263,7 +278,7 @@ const FinanceDataExplorer = () => {
     const nodeId = node.id.split(':')[1];
     const attributes = getNodeAttributes(node);
 
-    const handleNodeMouseDown = (e) => {
+    const handleNodeMouseDown = (e: React.MouseEvent<SVGRectElement>) => {
       setIsDragging(true);
       dragStartPos.current = {
         x: e.clientX,
@@ -275,7 +290,7 @@ const FinanceDataExplorer = () => {
       e.preventDefault();
     };
 
-    const handleNodeMouseMove = useCallback((e) => {
+    const handleNodeMouseMove = useCallback((e: MouseEvent) => {
       if (isDragging) {
         const deltaX = (e.clientX - dragStartPos.current.x) / zoom;
         const deltaY = (e.clientY - dragStartPos.current.y) / zoom;
@@ -285,7 +300,7 @@ const FinanceDataExplorer = () => {
           y: dragStartPos.current.nodeY + deltaY
         };
         
-        setNodePos(newPos);
+        setNodePos(prev => ({ ...prev, ...newPos }));
         setNodePositions(prev => ({
           ...prev,
           [node.id]: { ...prev[node.id], ...newPos }
@@ -431,7 +446,7 @@ const FinanceDataExplorer = () => {
     }
 
     // Calculate graph bounds
-    const positions = Object.values(nodePositions);
+    const positions = Object.values(nodePositions) as { x: number; y: number; level: number; index: number }[];
     if (positions.length === 0) return null;
 
     const minX = Math.min(...positions.map(p => p.x)) - 100;
@@ -439,10 +454,11 @@ const FinanceDataExplorer = () => {
     const minY = Math.min(...positions.map(p => p.y)) + GRAPH_CONFIG.ATTR_OFFSET_Y - 50;
     const maxY = Math.max(...positions.map(p => p.y)) + GRAPH_CONFIG.NODE_HEIGHT + 100;
 
-    const viewBox = `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
+    const width = (maxX - minX);
+    const height = (maxY - minY);
 
     return (
-      <div className="relative w-full h-full overflow-hidden">
+      <div className="relative w-full h-full overflow-auto">
         {/* Graph Controls */}
         <div className="absolute top-4 right-4 z-10 flex gap-2">
           <button
@@ -473,115 +489,119 @@ const FinanceDataExplorer = () => {
           {Math.round(zoom * 100)}%
         </div>
 
-        {/* SVG Graph */}
-        <svg
-          ref={svgRef}
-          className="w-full h-full cursor-grab active:cursor-grabbing graph-background"
-          viewBox={viewBox}
-          onMouseDown={handleMouseDown}
-          style={{
-            transform: `scale(${zoom}) translate(${panOffset.x}px, ${panOffset.y}px)`
-          }}
-        >
-          {/* Background */}
-          <rect
-            x={minX}
-            y={minY}
-            width={maxX - minX}
-            height={maxY - minY}
-            fill="#fafafa"
-            className="graph-background"
-          />
+        {/* Scrollable inner canvas sized by content and zoom */}
+        <div style={{ width: `${width * zoom}px`, height: `${height * zoom}px` }}>
+          <svg
+            ref={svgRef}
+            width={width * zoom}
+            height={height * zoom}
+            className="cursor-grab active:cursor-grabbing graph-background"
+            viewBox={`${minX} ${minY} ${width} ${height}`}
+            onMouseDown={handleMouseDown}
+          >
+            {/* Background */}
+            <rect
+              x={minX}
+              y={minY}
+              width={width}
+              height={height}
+              fill="#fafafa"
+              className="graph-background"
+            />
 
-          {/* Grid pattern */}
-          <defs>
-            <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
-              <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#f0f0f0" strokeWidth="1"/>
-            </pattern>
-          </defs>
-          <rect
-            x={minX}
-            y={minY}
-            width={maxX - minX}
-            height={maxY - minY}
-            fill="url(#grid)"
-          />
+            {/* Grid pattern */}
+            <defs>
+              <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+                <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#f0f0f0" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect
+              x={minX}
+              y={minY}
+              width={width}
+              height={height}
+              fill="url(#grid)"
+            />
 
-          {/* Arrow marker definition */}
-          <defs>
-            <marker
-              id="arrowhead"
-              markerWidth="12"
-              markerHeight="8"
-              refX="11"
-              refY="4"
-              orient="auto"
-              markerUnits="strokeWidth"
-            >
-              <polygon
-                points="0 0, 12 4, 0 8"
-                fill="#4a5568"
-              />
-            </marker>
-          </defs>
-
-          {/* Render edges */}
-          {graphData.edges.map(edge => {
-            const sourcePos = nodePositions[edge.source];
-            const targetPos = nodePositions[edge.target];
-            if (!sourcePos || !targetPos) return null;
-
-            const startX = sourcePos.x + GRAPH_CONFIG.NODE_WIDTH;
-            const startY = sourcePos.y + GRAPH_CONFIG.NODE_HEIGHT / 2;
-            const endX = targetPos.x;
-            const endY = targetPos.y + GRAPH_CONFIG.NODE_HEIGHT / 2;
-
-            // Calculate control points for smooth curve
-            const controlOffset = Math.min(100, Math.abs(endX - startX) / 3);
-            const controlX1 = startX + controlOffset;
-            const controlX2 = endX - controlOffset;
-
-            const pathData = `M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`;
-
-            return (
-              <g key={edge.id}>
-                <path
-                  d={pathData}
-                  stroke="#4a5568"
-                  strokeWidth="2"
-                  fill="none"
-                  markerEnd="url(#arrowhead)"
-                  className="pointer-events-none"
+            {/* Arrow marker definition */}
+            <defs>
+              <marker
+                id="arrowhead"
+                markerWidth="12"
+                markerHeight="8"
+                refX="11"
+                refY="4"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <polygon
+                  points="0 0, 12 4, 0 8"
+                  fill="#4a5568"
                 />
-                {edge.label && (
-                  <text
-                    x={(startX + endX) / 2}
-                    y={(startY + endY) / 2 - 10}
-                    textAnchor="middle"
-                    className="fill-gray-600 text-sm font-medium pointer-events-none select-none"
-                  >
-                    {edge.label}
-                  </text>
-                )}
-              </g>
-            );
-          })}
+              </marker>
+            </defs>
 
-          {/* Render nodes */}
-          {graphData.nodes.map(node => {
-            const position = nodePositions[node.id];
-            if (!position) return null;
-            
-            return (
-              <DraggableNode
-                key={node.id}
-                node={node}
-                position={position}
-                onNodeClick={handleNodeClick}
-              />
-            );
-          })}
-        </svg>
+            {/* Panning group */}
+            <g transform={`translate(${panOffset.x}, ${panOffset.y})`}>
+              {/* Render edges */}
+              {graphData.edges.map(edge => {
+                const sourcePos = nodePositions[edge.source];
+                const targetPos = nodePositions[edge.target];
+                if (!sourcePos || !targetPos) return null;
+
+                const startX = sourcePos.x + GRAPH_CONFIG.NODE_WIDTH;
+                const startY = sourcePos.y + GRAPH_CONFIG.NODE_HEIGHT / 2;
+                const endX = targetPos.x;
+                const endY = targetPos.y + GRAPH_CONFIG.NODE_HEIGHT / 2;
+
+                // Calculate control points for smooth curve
+                const controlOffset = Math.min(120, Math.max(60, Math.abs(endX - startX) / 3));
+                const controlX1 = startX + controlOffset;
+                const controlX2 = endX - controlOffset;
+
+                const pathData = `M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`;
+
+                return (
+                  <g key={edge.id}>
+                    <path
+                      d={pathData}
+                      stroke="#4a5568"
+                      strokeWidth="2"
+                      fill="none"
+                      markerEnd="url(#arrowhead)"
+                      className="pointer-events-none"
+                    />
+                    {edge.label && (
+                      <text
+                        x={(startX + endX) / 2}
+                        y={(startY + endY) / 2 - 10}
+                        textAnchor="middle"
+                        className="fill-gray-600 text-sm font-medium pointer-events-none select-none"
+                      >
+                        {edge.label}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+
+              {/* Render nodes */}
+              {graphData.nodes.map(node => {
+                const position = nodePositions[node.id];
+                if (!position) return null;
+                
+                return (
+                  <DraggableNode
+                    key={node.id}
+                    node={node}
+                    position={position}
+                    onNodeClick={handleNodeClick}
+                  />
+                );
+              })}
+            </g>
+          </svg>
+        </div>
       </div>
     );
   };
@@ -641,18 +661,18 @@ const FinanceDataExplorer = () => {
   };
 
   // Mouse handlers for panel resizing
-  const handleVerticalMouseDown = (e) => {
+  const handleVerticalMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     isDraggingVertical.current = true;
     e.preventDefault();
   };
 
-  const handleHorizontalMouseDown = (e) => {
+  const handleHorizontalMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     isDraggingHorizontal.current = true;
     e.preventDefault();
   };
 
   useEffect(() => {
-    const handleMouseMove = (e) => {
+    const handleMouseMove = (e: MouseEvent) => {
       if (isDraggingVertical.current) {
         setLeftWidth(Math.max(250, Math.min(600, e.clientX)));
       }
