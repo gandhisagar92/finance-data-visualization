@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GraphResponse, GraphNode, GraphEdge, GraphConfig, NodePositions, AttrPositions } from '../types';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { GraphResponse, GraphNode, GraphConfig, NodePositions, AttrPositions } from '../types';
 import { ZoomIn, ZoomOut, RotateCcw, SlidersHorizontal } from 'lucide-react';
 
 interface GraphViewProps {

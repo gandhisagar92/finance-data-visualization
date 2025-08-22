@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import HeaderBar from './components/HeaderBar';
 import SearchForm from './components/SearchForm';
 import GraphView from './components/GraphView';

@@ -1,28 +1,28 @@
 Reference Data Relationship Explorer
 
 Tech Stack
-- Frontend: React + TypeScript + TailwindCSS + PostCSS + esbuild (no Vite)
+- Frontend: React + TypeScript + TailwindCSS + Vite
 - Backend: Python (Tornado), file-backed JSON store (mock DB)
 - Node 20+, npm 10+, Python 3.10+
 
-Run locally
+Run locally (two services)
 1. Backend
    - Install deps:
      ```bash
      python3 -m pip install --break-system-packages -r /workspace/backend/requirements.txt
      ```
-2. Frontend (build static assets)
+   - Run:
+     ```bash
+     python3 /workspace/backend/app.py
+     ```
+   - Server runs on http://localhost:8000
+2. Frontend (Vite dev server)
    ```bash
    cd /workspace/frontend
    npm install
-   npm run build
+   npm run dev
    ```
-   - This produces `/workspace/frontend/dist` with `assets/styles.css` and `assets/bundle.js`.
-3. Start backend (also serves frontend):
-   ```bash
-   python3 /workspace/backend/app.py
-   ```
-   - Open http://localhost:8000 to view the app (backend serves `/` and `/static/*`).
+   - App runs on http://localhost:5173 and proxies /api to backend
 
 API Contract
 - GET /api/meta → Meta for dynamic UI + graph/ui config
