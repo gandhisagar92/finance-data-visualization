@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { GraphResponse, GraphNode, GraphConfig, NodePositions, AttrPositions } from '../types';
+import { GraphResponse, GraphNode, GraphConfig, NodePositions, AttrPositions, StyleConfig } from '../types';
 import { ZoomIn, ZoomOut, RotateCcw, SlidersHorizontal } from 'lucide-react';
 
 interface GraphViewProps {
@@ -8,9 +8,10 @@ interface GraphViewProps {
 	showAttributes: boolean;
 	onToggleAttributes: () => void;
 	onNodeClick: (nodeId: string, nodeType: string, businessId: string) => void;
+	styleConfig: StyleConfig;
 }
 
-const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttributes, onToggleAttributes, onNodeClick }) => {
+const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttributes, onToggleAttributes, onNodeClick, styleConfig }) => {
 	const [zoom, setZoom] = useState(1);
 	const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
 	const [nodePositions, setNodePositions] = useState<NodePositions>({});
@@ -76,7 +77,13 @@ const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttri
 			if (!nodesPerLevel[level]) nodesPerLevel[level] = [];
 			nodesPerLevel[level].push(nodeId);
 			if (adjacencyMap[nodeId]) {
-				adjacencyMap[nodeId].forEach(childId => {
+				// Sort children by node label for consistent vertical order (reduces edge overlap)
+				const sortedChildren = [...adjacencyMap[nodeId]].sort((a, b) => {
+					const na = graphData.nodes.find(n => n.id === a)?.label || a;
+					const nb = graphData.nodes.find(n => n.id === b)?.label || b;
+					return na.localeCompare(nb);
+				});
+				sortedChildren.forEach(childId => {
 					if (!visited.has(childId)) {
 						visited.add(childId);
 						levels[childId] = level + 1;
@@ -97,11 +104,11 @@ const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttri
 		const maxPerLevel = levelKeys.length ? Math.max(...levelKeys.map(k => (nodesPerLevel[k] || []).length)) : 1;
 		const dynamicLevelSpacing = Math.max(
 			graphConfig.LEVEL_SPACING_MIN,
-			Math.min(graphConfig.LEVEL_SPACING_MAX, 220 + 60 * Math.log2(Math.max(2, maxPerLevel)))
+			Math.min(graphConfig.LEVEL_SPACING_MAX, 240 + 70 * Math.log2(Math.max(2, maxPerLevel)))
 		);
 		const dynamicVerticalSpacing = Math.max(
 			graphConfig.VERTICAL_SPACING_MIN,
-			Math.min(graphConfig.VERTICAL_SPACING_MAX, 120 + 20 * maxPerLevel)
+			Math.min(graphConfig.VERTICAL_SPACING_MAX, 130 + 22 * maxPerLevel)
 		);
 		Object.entries(nodesPerLevel).forEach(([level, nodeIds]) => {
 			const levelNum = parseInt(level);
@@ -117,9 +124,7 @@ const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttri
 		setNodePositions(positions);
 	}, [graphData, graphConfig]);
 
-	useEffect(() => {
-		if (graphData.nodes.length) calculateNodePositions();
-	}, [graphData, calculateNodePositions]);
+	useEffect(() => { if (graphData.nodes.length) calculateNodePositions(); }, [graphData, calculateNodePositions]);
 
 	const handleZoomIn = () => setZoom(z => Math.min(z + graphConfig.ZOOM_STEP, graphConfig.MAX_ZOOM));
 	const handleZoomOut = () => setZoom(z => Math.max(z - graphConfig.ZOOM_STEP, graphConfig.MIN_ZOOM));
@@ -157,18 +162,11 @@ const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttri
 			scheduleFrame();
 		}
 	}, [zoom, nodePositions, attrPositions, scheduleFrame]);
-	const onDocMouseUp = useCallback(() => {
-		isPanning.current = false;
-		draggingNodeId.current = null;
-		draggingAttrKey.current = null;
-	}, []);
+	const onDocMouseUp = useCallback(() => { isPanning.current = false; draggingNodeId.current = null; draggingAttrKey.current = null; }, []);
 	useEffect(() => {
 		document.addEventListener('mousemove', onDocMouseMove);
 		document.addEventListener('mouseup', onDocMouseUp);
-		return () => {
-			document.removeEventListener('mousemove', onDocMouseMove);
-			document.removeEventListener('mouseup', onDocMouseUp);
-		};
+		return () => { document.removeEventListener('mousemove', onDocMouseMove); document.removeEventListener('mouseup', onDocMouseUp); };
 	}, [onDocMouseMove, onDocMouseUp]);
 
 	if (!graphData.nodes.length) {
@@ -234,7 +232,7 @@ const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttri
 						const startY = sourcePos.y + graphConfig.NODE_HEIGHT / 2;
 						const endX = targetPos.x;
 						const endY = targetPos.y + graphConfig.NODE_HEIGHT / 2;
-						const controlOffset = Math.min(120, Math.max(60, Math.abs(endX - startX) / 3));
+						const controlOffset = Math.min(160, Math.max(70, Math.abs(endX - startX) / 2.5));
 						const controlX1 = startX + controlOffset;
 						const controlX2 = endX - controlOffset;
 						const pathData = `M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`;
@@ -242,7 +240,7 @@ const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttri
 							<g key={edge.id}>
 								<path d={pathData} stroke="#4a5568" strokeWidth="2" fill="none" markerEnd="url(#arrowhead)" className="pointer-events-none" />
 								{edge.label && (
-									<text x={(startX + endX) / 2} y={(startY + endY) / 2 - 10} textAnchor="middle" className="fill-gray-600 text-sm font-medium pointer-events-none select-none">{edge.label}</text>
+									<text x={(startX + endX) / 2} y={(startY + endY) / 2 - 10} textAnchor="middle" style={{ fontSize: styleConfig.edgeLabelFontPx }} className="fill-gray-600 font-medium pointer-events-none select-none">{edge.label}</text>
 								)}
 							</g>
 						);
@@ -275,9 +273,9 @@ const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttri
 									onMouseEnter={nodeHover}
 									onMouseLeave={clearHover}
 								/>
-								<text x={pos.x + graphConfig.NODE_WIDTH / 2} y={pos.y + 25} textAnchor="middle" className="fill-gray-800 text-sm font-semibold pointer-events-none select-none">{node.type}: {businessId}</text>
+								<text x={pos.x + graphConfig.NODE_WIDTH / 2} y={pos.y + 22} textAnchor="middle" style={{ fontSize: styleConfig.nodeTitleFontPx }} className="fill-gray-800 font-semibold pointer-events-none select-none">{node.type}: {businessId}</text>
 								<line x1={pos.x + 10} y1={pos.y + graphConfig.NODE_HEIGHT / 2} x2={pos.x + graphConfig.NODE_WIDTH - 10} y2={pos.y + graphConfig.NODE_HEIGHT / 2} stroke="#e2e8f0" strokeWidth={1} className="pointer-events-none"/>
-								<text x={pos.x + graphConfig.NODE_WIDTH / 2} y={pos.y + 75} textAnchor="middle" className="fill-gray-600 text-sm pointer-events-none select-none">{node.label.length > 20 ? node.label.substring(0, 20) + '...' : node.label}</text>
+								<text x={pos.x + graphConfig.NODE_WIDTH / 2} y={pos.y + graphConfig.NODE_HEIGHT - 16} textAnchor="middle" style={{ fontSize: styleConfig.nodeLabelFontPx }} className="fill-gray-600 pointer-events-none select-none">{node.label.length > 22 ? node.label.substring(0, 22) + '...' : node.label}</text>
 								{/* Attributes */}
 								{showAttributes && attributes.slice(0, 3).map((attr, index) => {
 									const key = `${node.id}::${attr.key}`;
@@ -298,8 +296,8 @@ const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttri
 										<g key={key}>
 											<line x1={pos.x + graphConfig.NODE_WIDTH / 2} y1={pos.y} x2={attrCenterX} y2={attrY + graphConfig.ATTR_HEIGHT} stroke="#cbd5e0" strokeWidth={1} className="pointer-events-none" />
 											<ellipse cx={attrCenterX} cy={attrCenterY} rx={graphConfig.ATTR_WIDTH / 2} ry={graphConfig.ATTR_HEIGHT / 2} fill="#f7fafc" stroke="#e2e8f0" strokeWidth={1} className="cursor-move hover:fill-gray-100 transition-colors" onMouseDown={attrDown} />
-											<text x={attrCenterX} y={attrCenterY - 5} textAnchor="middle" className="fill-gray-700 text-xs font-medium pointer-events-none select-none">{attr.key}</text>
-											<text x={attrCenterX} y={attrCenterY + 8} textAnchor="middle" className="fill-gray-600 text-xs pointer-events-none select-none">{attr.value.length > 15 ? attr.value.substring(0, 15) + '...' : attr.value}</text>
+											<text x={attrCenterX} y={attrCenterY - 4} textAnchor="middle" style={{ fontSize: styleConfig.attrKeyFontPx }} className="fill-gray-700 font-medium pointer-events-none select-none">{attr.key}</text>
+											<text x={attrCenterX} y={attrCenterY + 7} textAnchor="middle" style={{ fontSize: styleConfig.attrValFontPx }} className="fill-gray-600 pointer-events-none select-none">{attr.value.length > 14 ? attr.value.substring(0, 14) + '...' : attr.value}</text>
 										</g>
 									);
 								})}
@@ -310,7 +308,7 @@ const GraphView: React.FC<GraphViewProps> = ({ graphData, graphConfig, showAttri
 			</svg>
 			{/* Hover tooltip */}
 			{hoverInfo && (
-				<div className="absolute z-20 bg-white border border-gray-300 rounded shadow px-2 py-1 text-[10px] text-gray-700" style={{ left: hoverInfo.x, top: hoverInfo.y }}>
+				<div className="absolute z-20 bg-white border border-gray-300 rounded shadow px-2 py-1 text-gray-700" style={{ left: hoverInfo.x, top: hoverInfo.y, fontSize: styleConfig.tooltipFontPx }}>
 					{hoverInfo.lines.map((l, i) => (<div key={i}>{l}</div>))}
 				</div>
 			)}

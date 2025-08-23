@@ -21,7 +21,15 @@ export type GraphConfig = {
 	ZOOM_STEP: number;
 };
 export type UiConfig = { LEFT_WIDTH: number; TOP_HEIGHT: number };
-export type MetaData = { referenceDataTypes: MetaRefType[]; graphConfig: GraphConfig; uiConfig: UiConfig };
+export type StyleConfig = {
+	nodeTitleFontPx: number;
+	nodeLabelFontPx: number;
+	edgeLabelFontPx: number;
+	attrKeyFontPx: number;
+	attrValFontPx: number;
+	tooltipFontPx: number;
+};
+export type MetaData = { referenceDataTypes: MetaRefType[]; graphConfig: GraphConfig; uiConfig: UiConfig; styleConfig: StyleConfig };
 
 export type NodePositions = Record<string, { x: number; y: number; level: number; index: number }>;
 export type AttrPositions = Record<string, { x: number; y: number }>;

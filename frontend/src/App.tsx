@@ -92,13 +92,14 @@ function App() {
 					<GraphView
 						graphData={graphData}
 						graphConfig={metaData?.graphConfig || {
-							NODE_WIDTH: 200, NODE_HEIGHT: 100, ATTR_WIDTH: 140, ATTR_HEIGHT: 40,
-							LEVEL_SPACING_MIN: 260, LEVEL_SPACING_MAX: 480, VERTICAL_SPACING_MIN: 140, VERTICAL_SPACING_MAX: 240,
-							ATTR_OFFSET_Y: -60, ATTR_SPACING_X: 50, MIN_ZOOM: 0.1, MAX_ZOOM: 3, ZOOM_STEP: 0.1
+							NODE_WIDTH: 190, NODE_HEIGHT: 84, ATTR_WIDTH: 100, ATTR_HEIGHT: 28,
+							LEVEL_SPACING_MIN: 280, LEVEL_SPACING_MAX: 520, VERTICAL_SPACING_MIN: 150, VERTICAL_SPACING_MAX: 260,
+							ATTR_OFFSET_Y: -50, ATTR_SPACING_X: 32, MIN_ZOOM: 0.1, MAX_ZOOM: 3, ZOOM_STEP: 0.1
 						}}
 						showAttributes={showAttributes}
 						onToggleAttributes={() => setShowAttributes(s => !s)}
 						onNodeClick={handleNodeClick}
+						styleConfig={metaData?.styleConfig || { nodeTitleFontPx: 11, nodeLabelFontPx: 10, edgeLabelFontPx: 10, attrKeyFontPx: 10, attrValFontPx: 10, tooltipFontPx: 10 }}
 					/>
 				</div>
 			</div>
